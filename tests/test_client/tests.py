@@ -59,6 +59,14 @@ class ClientTest(TestCase):
         response = self.client.get('/get_view/?var=1\ufffd')
         self.assertEqual(response.context['var'], '1\ufffd')
 
+    def test_get_data_none(self):
+        msg = (
+            'Cannot encode None in a query string. Did you mean to pass an '
+            'empty string or omit the value?'
+        )
+        with self.assertRaisesMessage(TypeError, msg):
+            self.client.get('/get_view/', {'value': None})
+
     def test_get_post_view(self):
         "GET a view that normally expects POSTs"
         response = self.client.get('/post_view/', {})
@@ -92,17 +100,32 @@ class ClientTest(TestCase):
         self.assertEqual(response.templates[0].name, 'POST Template')
         self.assertContains(response, 'Data received')
 
+    def test_post_data_none(self):
+        msg = (
+            'Cannot encode None as POST data. Did you mean to pass an empty '
+            'string or omit the value?'
+        )
+        with self.assertRaisesMessage(TypeError, msg):
+            self.client.post('/post_view/', {'value': None})
+
     def test_json_serialization(self):
         """The test client serializes JSON data."""
         methods = ('post', 'put', 'patch', 'delete')
+        tests = (
+            ({'value': 37}, {'value': 37}),
+            ([37, True], [37, True]),
+            ((37, False), [37, False]),
+        )
         for method in methods:
             with self.subTest(method=method):
-                client_method = getattr(self.client, method)
-                method_name = method.upper()
-                response = client_method('/json_view/', {'value': 37}, content_type='application/json')
-                self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.context['data'], 37)
-                self.assertContains(response, 'Viewing %s page.' % method_name)
+                for data, expected in tests:
+                    with self.subTest(data):
+                        client_method = getattr(self.client, method)
+                        method_name = method.upper()
+                        response = client_method('/json_view/', data, content_type='application/json')
+                        self.assertEqual(response.status_code, 200)
+                        self.assertEqual(response.context['data'], expected)
+                        self.assertContains(response, 'Viewing %s page.' % method_name)
 
     def test_json_encoder_argument(self):
         """The test Client accepts a json_encoder."""
@@ -854,9 +877,7 @@ class RequestFactoryTest(SimpleTestCase):
         ('options', _generic_view),
         ('trace', trace_view),
     )
-
-    def setUp(self):
-        self.request_factory = RequestFactory()
+    request_factory = RequestFactory()
 
     def test_request_factory(self):
         """The request factory implements all the HTTP/1.1 methods."""

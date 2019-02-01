@@ -80,7 +80,7 @@ Get the latest SpatiaLite library source bundle from the
 
         $ ./configure --target=macosx
 
-__ http://www.gaia-gis.it/gaia-sins/libspatialite-sources/
+__ https://www.gaia-gis.it/gaia-sins/libspatialite-sources/
 
 .. _spatialite_macos:
 
@@ -116,7 +116,7 @@ Homebrew
 --------
 
 `Homebrew`_ handles all the SpatiaLite related packages on your behalf,
-including SQLite3, SpatiaLite, PROJ, and GEOS. Install them like this::
+including SQLite, SpatiaLite, PROJ, and GEOS. Install them like this::
 
     $ brew update
     $ brew install spatialite-tools

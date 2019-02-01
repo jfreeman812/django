@@ -99,8 +99,6 @@ class SearchQueryCombinable:
                 'SearchQuery can only be combined with other SearchQuerys, '
                 'got {}.'.format(type(other))
             )
-        if not self.config == other.config:
-            raise TypeError("SearchQuery configs don't match.")
         if reversed:
             return CombinedSearchQuery(other, connector, self, self.config)
         return CombinedSearchQuery(self, connector, other, self.config)
@@ -123,10 +121,18 @@ class SearchQueryCombinable:
 
 class SearchQuery(SearchQueryCombinable, Value):
     output_field = SearchQueryField()
+    SEARCH_TYPES = {
+        'plain': 'plainto_tsquery',
+        'phrase': 'phraseto_tsquery',
+        'raw': 'to_tsquery',
+    }
 
-    def __init__(self, value, output_field=None, *, config=None, invert=False):
+    def __init__(self, value, output_field=None, *, config=None, invert=False, search_type='plain'):
         self.config = config
         self.invert = invert
+        if search_type not in self.SEARCH_TYPES:
+            raise ValueError("Unknown search_type argument '%s'." % search_type)
+        self.search_type = search_type
         super().__init__(value, output_field=output_field)
 
     def resolve_expression(self, query=None, allow_joins=True, reuse=None, summarize=False, for_save=False):
@@ -140,12 +146,13 @@ class SearchQuery(SearchQueryCombinable, Value):
 
     def as_sql(self, compiler, connection):
         params = [self.value]
+        function = self.SEARCH_TYPES[self.search_type]
         if self.config:
             config_sql, config_params = compiler.compile(self.config)
-            template = 'plainto_tsquery({}::regconfig, %s)'.format(config_sql)
+            template = '{}({}::regconfig, %s)'.format(function, config_sql)
             params = config_params + [self.value]
         else:
-            template = 'plainto_tsquery(%s)'
+            template = '{}(%s)'.format(function)
         if self.invert:
             template = '!!({})'.format(template)
         return template, params
@@ -158,11 +165,18 @@ class SearchQuery(SearchQueryCombinable, Value):
     def __invert__(self):
         return type(self)(self.value, config=self.config, invert=not self.invert)
 
+    def __str__(self):
+        result = super().__str__()
+        return ('~%s' % result) if self.invert else result
+
 
 class CombinedSearchQuery(SearchQueryCombinable, CombinedExpression):
     def __init__(self, lhs, connector, rhs, config, output_field=None):
         self.config = config
         super().__init__(lhs, connector, rhs, output_field)
+
+    def __str__(self):
+        return '(%s)' % super().__str__()
 
 
 class SearchRank(Func):

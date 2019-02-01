@@ -7,7 +7,10 @@ from admin_scripts.tests import AdminScriptTestCase
 from django.apps import apps
 from django.core import management
 from django.core.management import BaseCommand, CommandError, find_commands
-from django.core.management.utils import find_command, popen_wrapper
+from django.core.management.utils import (
+    find_command, get_random_secret_key, is_ignored_path,
+    normalize_path_patterns, popen_wrapper,
+)
 from django.db import connection
 from django.test import SimpleTestCase, override_settings
 from django.test.utils import captured_stderr, extend_sys_path
@@ -177,18 +180,18 @@ class CommandTests(SimpleTestCase):
     def test_call_command_unrecognized_option(self):
         msg = (
             'Unknown option(s) for dance command: unrecognized. Valid options '
-            'are: example, help, integer, no_color, opt_3, option3, '
-            'pythonpath, settings, skip_checks, stderr, stdout, style, '
-            'traceback, verbosity, version.'
+            'are: example, force_color, help, integer, no_color, opt_3, '
+            'option3, pythonpath, settings, skip_checks, stderr, stdout, '
+            'style, traceback, verbosity, version.'
         )
         with self.assertRaisesMessage(TypeError, msg):
             management.call_command('dance', unrecognized=1)
 
         msg = (
             'Unknown option(s) for dance command: unrecognized, unrecognized2. '
-            'Valid options are: example, help, integer, no_color, opt_3, '
-            'option3, pythonpath, settings, skip_checks, stderr, stdout, '
-            'style, traceback, verbosity, version.'
+            'Valid options are: example, force_color, help, integer, no_color, '
+            'opt_3, option3, pythonpath, settings, skip_checks, stderr, '
+            'stdout, style, traceback, verbosity, version.'
         )
         with self.assertRaisesMessage(TypeError, msg):
             management.call_command('dance', unrecognized=1, unrecognized2=1)
@@ -260,3 +263,31 @@ class UtilsTests(SimpleTestCase):
         msg = 'Error executing a_42_command_that_doesnt_exist_42'
         with self.assertRaisesMessage(CommandError, msg):
             popen_wrapper(['a_42_command_that_doesnt_exist_42'])
+
+    def test_get_random_secret_key(self):
+        key = get_random_secret_key()
+        self.assertEqual(len(key), 50)
+        for char in key:
+            self.assertIn(char, 'abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*(-_=+)')
+
+    def test_is_ignored_path_true(self):
+        patterns = (
+            ['foo/bar/baz'],
+            ['baz'],
+            ['foo/bar/baz'],
+            ['*/baz'],
+            ['*'],
+            ['b?z'],
+            ['[abc]az'],
+            ['*/ba[!z]/baz'],
+        )
+        for ignore_patterns in patterns:
+            with self.subTest(ignore_patterns=ignore_patterns):
+                self.assertIs(is_ignored_path('foo/bar/baz', ignore_patterns=ignore_patterns), True)
+
+    def test_is_ignored_path_false(self):
+        self.assertIs(is_ignored_path('foo/bar/baz', ignore_patterns=['foo/bar/bat', 'bar', 'flub/blub']), False)
+
+    def test_normalize_path_patterns_truncates_wildcard_base(self):
+        expected = [os.path.normcase(p) for p in ['foo/bar', 'bar/*/']]
+        self.assertEqual(normalize_path_patterns(['foo/bar/*', 'bar/*/']), expected)

@@ -832,8 +832,9 @@ class UniqueTest(TestCase):
     """
     unique/unique_together validation.
     """
-    def setUp(self):
-        self.writer = Writer.objects.create(name='Mike Royko')
+    @classmethod
+    def setUpTestData(cls):
+        cls.writer = Writer.objects.create(name='Mike Royko')
 
     def test_simple_unique(self):
         form = ProductForm({'slug': 'teddy-bear-blue'})
@@ -854,6 +855,34 @@ class UniqueTest(TestCase):
         self.assertFalse(form.is_valid())
         self.assertEqual(len(form.errors), 1)
         self.assertEqual(form.errors['__all__'], ['Price with this Price and Quantity already exists.'])
+
+    def test_unique_together_exclusion(self):
+        """
+        Forms don't validate unique_together constraints when only part of the
+        constraint is included in the form's fields. This allows using
+        form.save(commit=False) and then assigning the missing field(s) to the
+        model instance.
+        """
+        class BookForm(forms.ModelForm):
+            class Meta:
+                model = DerivedBook
+                fields = ('isbn', 'suffix1')
+
+        # The unique_together is on suffix1/suffix2 but only suffix1 is part
+        # of the form. The fields must have defaults, otherwise they'll be
+        # skipped by other logic.
+        self.assertEqual(DerivedBook._meta.unique_together, (('suffix1', 'suffix2'),))
+        for name in ('suffix1', 'suffix2'):
+            with self.subTest(name=name):
+                field = DerivedBook._meta.get_field(name)
+                self.assertEqual(field.default, 0)
+
+        # The form fails validation with "Derived book with this Suffix1 and
+        # Suffix2 already exists." if the unique_together validation isn't
+        # skipped.
+        DerivedBook.objects.create(isbn='12345')
+        form = BookForm({'isbn': '56789', 'suffix1': '0'})
+        self.assertTrue(form.is_valid(), form.errors)
 
     def test_multiple_field_unique_together(self):
         """
@@ -1268,9 +1297,11 @@ class ModelFormBasicTests(TestCase):
 
     def test_basic_creation(self):
         self.assertEqual(Category.objects.count(), 0)
-        f = BaseCategoryForm({'name': 'Entertainment',
-                              'slug': 'entertainment',
-                              'url': 'entertainment'})
+        f = BaseCategoryForm({
+            'name': 'Entertainment',
+            'slug': 'entertainment',
+            'url': 'entertainment',
+        })
         self.assertTrue(f.is_valid())
         self.assertEqual(f.cleaned_data['name'], 'Entertainment')
         self.assertEqual(f.cleaned_data['slug'], 'entertainment')
@@ -1559,10 +1590,11 @@ class ModelFormBasicTests(TestCase):
 
 
 class ModelMultipleChoiceFieldTests(TestCase):
-    def setUp(self):
-        self.c1 = Category.objects.create(name='Entertainment', slug='entertainment', url='entertainment')
-        self.c2 = Category.objects.create(name="It's a test", slug='its-test', url='test')
-        self.c3 = Category.objects.create(name='Third', slug='third-test', url='third')
+    @classmethod
+    def setUpTestData(cls):
+        cls.c1 = Category.objects.create(name='Entertainment', slug='entertainment', url='entertainment')
+        cls.c2 = Category.objects.create(name="It's a test", slug='its-test', url='test')
+        cls.c3 = Category.objects.create(name='Third', slug='third-test', url='third')
 
     def test_model_multiple_choice_field(self):
         f = forms.ModelMultipleChoiceField(Category.objects.all())
@@ -1682,15 +1714,23 @@ class ModelMultipleChoiceFieldTests(TestCase):
         person1 = Writer.objects.create(name="Person 1")
         person2 = Writer.objects.create(name="Person 2")
 
-        form = WriterForm(initial={'persons': [person1, person2]},
-                          data={'initial-persons': [str(person1.pk), str(person2.pk)],
-                                'persons': [str(person1.pk), str(person2.pk)]})
+        form = WriterForm(
+            initial={'persons': [person1, person2]},
+            data={
+                'initial-persons': [str(person1.pk), str(person2.pk)],
+                'persons': [str(person1.pk), str(person2.pk)],
+            },
+        )
         self.assertTrue(form.is_valid())
         self.assertFalse(form.has_changed())
 
-        form = WriterForm(initial={'persons': [person1, person2]},
-                          data={'initial-persons': [str(person1.pk), str(person2.pk)],
-                                'persons': [str(person2.pk)]})
+        form = WriterForm(
+            initial={'persons': [person1, person2]},
+            data={
+                'initial-persons': [str(person1.pk), str(person2.pk)],
+                'persons': [str(person2.pk)],
+            },
+        )
         self.assertTrue(form.is_valid())
         self.assertTrue(form.has_changed())
 
@@ -2821,7 +2861,7 @@ class CustomMetaclassTestCase(SimpleTestCase):
         self.assertEqual(new_cls.base_fields, {})
 
 
-class StrictAssignmentTests(TestCase):
+class StrictAssignmentTests(SimpleTestCase):
     """
     Should a model do anything special with __setattr__() or descriptors which
     raise a ValidationError, a model form should catch the error (#24706).

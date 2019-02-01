@@ -570,7 +570,7 @@ class BaseModelFormSet(BaseFormSet):
 
     def initial_form_count(self):
         """Return the number of forms that are required in this FormSet."""
-        if not (self.data or self.files):
+        if not self.is_bound:
             return len(self.get_queryset())
         return super().initial_form_count()
 
@@ -696,8 +696,12 @@ class BaseModelFormSet(BaseFormSet):
                     for field in unique_check if field in form.cleaned_data
                 )
                 # Reduce Model instances to their primary key values
-                row_data = tuple(d._get_pk_val() if hasattr(d, '_get_pk_val') else d
-                                 for d in row_data)
+                row_data = tuple(
+                    d._get_pk_val() if hasattr(d, '_get_pk_val')
+                    # Prevent "unhashable type: list" errors later on.
+                    else tuple(d) if isinstance(d, list)
+                    else d for d in row_data
+                )
                 if row_data and None not in row_data:
                     # if we've already seen it then we have a uniqueness failure
                     if row_data in seen_data:
@@ -954,8 +958,12 @@ class BaseInlineFormSet(BaseModelFormSet):
             kwargs = {
                 'label': getattr(form.fields.get(name), 'label', capfirst(self.fk.verbose_name))
             }
-            if self.fk.remote_field.field_name != self.fk.remote_field.model._meta.pk.name:
-                kwargs['to_field'] = self.fk.remote_field.field_name
+
+        # The InlineForeignKeyField assumes that the foreign key relation is
+        # based on the parent model's pk. If this isn't the case, set to_field
+        # to correctly resolve the initial form value.
+        if self.fk.remote_field.field_name != self.fk.remote_field.model._meta.pk.name:
+            kwargs['to_field'] = self.fk.remote_field.field_name
 
         # If we're adding a new object, ignore a parent's auto-generated key
         # as it will be regenerated on the save request.

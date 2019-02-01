@@ -7,7 +7,6 @@ from time import time
 
 from django.conf import settings
 from django.db.utils import NotSupportedError
-from django.utils.encoding import force_bytes
 from django.utils.timezone import utc
 
 logger = logging.getLogger('django.db.backends')
@@ -159,15 +158,11 @@ def typecast_timestamp(s):  # does NOT store time zone information
     if ' ' not in s:
         return typecast_date(s)
     d, t = s.split()
-    # Extract timezone information, if it exists. Currently it's ignored.
+    # Remove timezone information.
     if '-' in t:
-        t, tz = t.split('-', 1)
-        tz = '-' + tz
+        t, _ = t.split('-', 1)
     elif '+' in t:
-        t, tz = t.split('+', 1)
-        tz = '+' + tz
-    else:
-        tz = ''
+        t, _ = t.split('+', 1)
     dates = d.split('-')
     times = t.split(':')
     seconds = times[2]
@@ -214,8 +209,19 @@ def truncate_name(identifier, length=None, hash_len=4):
     if length is None or len(name) <= length:
         return identifier
 
-    digest = hashlib.md5(force_bytes(name)).hexdigest()[:hash_len]
+    digest = names_digest(name, length=hash_len)
     return '%s%s%s' % ('%s"."' % namespace if namespace else '', name[:length - hash_len], digest)
+
+
+def names_digest(*args, length):
+    """
+    Generate a 32-bit digest of a set of arguments that can be used to shorten
+    identifying names.
+    """
+    h = hashlib.md5()
+    for arg in args:
+        h.update(arg.encode())
+    return h.hexdigest()[:length]
 
 
 def format_number(value, max_digits, decimal_places):

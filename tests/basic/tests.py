@@ -238,19 +238,11 @@ class ModelTest(TestCase):
     def test_extra_method_select_argument_with_dashes_and_values(self):
         # The 'select' argument to extra() supports names with dashes in
         # them, as long as you use values().
-        Article.objects.create(
-            headline="Article 10",
-            pub_date=datetime(2005, 7, 31, 12, 30, 45),
-        )
-        Article.objects.create(
-            headline='Article 11',
-            pub_date=datetime(2008, 1, 1),
-        )
-        Article.objects.create(
-            headline='Article 12',
-            pub_date=datetime(2008, 12, 31, 23, 59, 59, 999999),
-        )
-
+        Article.objects.bulk_create([
+            Article(headline='Article 10', pub_date=datetime(2005, 7, 31, 12, 30, 45)),
+            Article(headline='Article 11', pub_date=datetime(2008, 1, 1)),
+            Article(headline='Article 12', pub_date=datetime(2008, 12, 31, 23, 59, 59, 999999)),
+        ])
         dicts = Article.objects.filter(
             pub_date__year=2008).extra(
             select={'dashed-value': '1'}).values('headline', 'dashed-value')
@@ -263,19 +255,11 @@ class ModelTest(TestCase):
         # If you use 'select' with extra() and names containing dashes on a
         # query that's *not* a values() query, those extra 'select' values
         # will silently be ignored.
-        Article.objects.create(
-            headline="Article 10",
-            pub_date=datetime(2005, 7, 31, 12, 30, 45),
-        )
-        Article.objects.create(
-            headline='Article 11',
-            pub_date=datetime(2008, 1, 1),
-        )
-        Article.objects.create(
-            headline='Article 12',
-            pub_date=datetime(2008, 12, 31, 23, 59, 59, 999999),
-        )
-
+        Article.objects.bulk_create([
+            Article(headline='Article 10', pub_date=datetime(2005, 7, 31, 12, 30, 45)),
+            Article(headline='Article 11', pub_date=datetime(2008, 1, 1)),
+            Article(headline='Article 12', pub_date=datetime(2008, 12, 31, 23, 59, 59, 999999)),
+        ])
         articles = Article.objects.filter(
             pub_date__year=2008).extra(select={'dashed-value': '1', 'undashedvalue': '2'})
         self.assertEqual(articles[0].undashedvalue, 2)
@@ -388,15 +372,16 @@ class ModelTest(TestCase):
 
 
 class ModelLookupTest(TestCase):
-    def setUp(self):
+    @classmethod
+    def setUpTestData(cls):
         # Create an Article.
-        self.a = Article(
+        cls.a = Article(
             id=None,
             headline='Swallow programs in Python',
             pub_date=datetime(2005, 7, 28),
         )
         # Save it into the database. You have to call save() explicitly.
-        self.a.save()
+        cls.a.save()
 
     def test_all_lookup(self):
         # Change values by changing the attributes, then calling save().
@@ -532,6 +517,7 @@ class ManagerTest(SimpleTestCase):
         'update_or_create',
         'create',
         'bulk_create',
+        'bulk_update',
         'filter',
         'aggregate',
         'annotate',
@@ -664,6 +650,12 @@ class ModelRefreshTests(TestCase):
         with self.assertRaisesMessage(TypeError, msg):
             s.refresh_from_db(unknown_kwarg=10)
 
+    def test_lookup_in_fields(self):
+        s = SelfRef.objects.create()
+        msg = 'Found "__" in fields argument. Relations and transforms are not allowed in fields.'
+        with self.assertRaisesMessage(ValueError, msg):
+            s.refresh_from_db(fields=['foo__bar'])
+
     def test_refresh_fk(self):
         s1 = SelfRef.objects.create()
         s2 = SelfRef.objects.create()
@@ -735,3 +727,27 @@ class ModelRefreshTests(TestCase):
         article.save()
         featured.refresh_from_db()
         self.assertEqual(featured.article.headline, 'Parrot programs in Python 2.0')
+
+    def test_prefetched_cache_cleared(self):
+        a = Article.objects.create(pub_date=datetime(2005, 7, 28))
+        s = SelfRef.objects.create(article=a)
+        # refresh_from_db() without fields=[...]
+        a1_prefetched = Article.objects.prefetch_related('selfref_set').first()
+        self.assertCountEqual(a1_prefetched.selfref_set.all(), [s])
+        s.article = None
+        s.save()
+        # Relation is cleared and prefetch cache is stale.
+        self.assertCountEqual(a1_prefetched.selfref_set.all(), [s])
+        a1_prefetched.refresh_from_db()
+        # Cache was cleared and new results are available.
+        self.assertCountEqual(a1_prefetched.selfref_set.all(), [])
+        # refresh_from_db() with fields=[...]
+        a2_prefetched = Article.objects.prefetch_related('selfref_set').first()
+        self.assertCountEqual(a2_prefetched.selfref_set.all(), [])
+        s.article = a
+        s.save()
+        # Relation is added and prefetch cache is stale.
+        self.assertCountEqual(a2_prefetched.selfref_set.all(), [])
+        a2_prefetched.refresh_from_db(fields=['selfref_set'])
+        # Cache was cleared and new results are available.
+        self.assertCountEqual(a2_prefetched.selfref_set.all(), [s])

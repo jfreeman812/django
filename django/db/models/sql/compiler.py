@@ -1,5 +1,4 @@
 import collections
-import functools
 import re
 import warnings
 from itertools import chain
@@ -14,8 +13,7 @@ from django.db.models.sql.constants import (
 from django.db.models.sql.query import Query, get_order_dir
 from django.db.transaction import TransactionManagementError
 from django.db.utils import DatabaseError, NotSupportedError
-from django.utils.deprecation import RemovedInDjango30Warning
-from django.utils.inspect import func_supports_parameter
+from django.utils.deprecation import RemovedInDjango31Warning
 
 FORCE = object()
 
@@ -34,6 +32,7 @@ class SQLCompiler:
         self.annotation_col_map = None
         self.klass_info = None
         self.ordering_parts = re.compile(r'(.*)\s(ASC|DESC)(.*)')
+        self._meta_ordering = None
 
     def setup_query(self):
         if all(self.query.alias_refcount[a] == 0 for a in self.query.alias_map):
@@ -266,8 +265,13 @@ class SQLCompiler:
             ordering = self.query.extra_order_by
         elif not self.query.default_ordering:
             ordering = self.query.order_by
+        elif self.query.order_by:
+            ordering = self.query.order_by
+        elif self.query.get_meta().ordering:
+            ordering = self.query.get_meta().ordering
+            self._meta_ordering = ordering
         else:
-            ordering = (self.query.order_by or self.query.get_meta().ordering or [])
+            ordering = []
         if self.query.standard_ordering:
             asc, desc = ORDER_DIR['ASC']
         else:
@@ -331,8 +335,9 @@ class SQLCompiler:
         seen = set()
 
         for expr, is_ref in order_by:
+            resolved = expr.resolve_expression(self.query, allow_joins=True, reuse=None)
             if self.query.combinator:
-                src = expr.get_source_expressions()[0]
+                src = resolved.get_source_expressions()[0]
                 # Relabel order by columns to raw numbers if this is a combined
                 # query; necessary since the columns can't be referenced by the
                 # fully qualified name and the simple column names may collide.
@@ -342,12 +347,10 @@ class SQLCompiler:
                     elif col_alias:
                         continue
                     if src == sel_expr:
-                        expr.set_source_expressions([RawSQL('%d' % (idx + 1), ())])
+                        resolved.set_source_expressions([RawSQL('%d' % (idx + 1), ())])
                         break
                 else:
                     raise DatabaseError('ORDER BY term does not match any column in the result set.')
-            resolved = expr.resolve_expression(
-                self.query, allow_joins=True, reuse=None)
             sql, params = self.compile(resolved)
             # Don't add the same column twice, but the order direction is
             # not taken into account so we strip it. When this entire method
@@ -416,8 +419,22 @@ class SQLCompiler:
                 # must have the same columns list. Set the selects defined on
                 # the query on all combined queries, if not already set.
                 if not compiler.query.values_select and self.query.values_select:
-                    compiler.query.set_values((*self.query.values_select, *self.query.annotation_select))
-                parts += (compiler.as_sql(),)
+                    compiler.query.set_values((
+                        *self.query.extra_select,
+                        *self.query.values_select,
+                        *self.query.annotation_select,
+                    ))
+                part_sql, part_args = compiler.as_sql()
+                if compiler.query.combinator:
+                    # Wrap in a subquery if wrapping in parentheses isn't
+                    # supported.
+                    if not features.supports_parentheses_in_compound:
+                        part_sql = 'SELECT * FROM ({})'.format(part_sql)
+                    # Add parentheses when combining with compound query if not
+                    # already added for all compound queries.
+                    elif not features.supports_slicing_ordering_in_compound:
+                        part_sql = '({})'.format(part_sql)
+                parts += ((part_sql, part_args),)
             except EmptyResultSet:
                 # Omit the empty queryset with UNION and with DIFFERENCE if the
                 # first queryset is nonempty.
@@ -532,7 +549,18 @@ class SQLCompiler:
                         raise NotImplementedError('annotate() + distinct(fields) is not implemented.')
                     order_by = order_by or self.connection.ops.force_no_ordering()
                     result.append('GROUP BY %s' % ', '.join(grouping))
-
+                    if self._meta_ordering:
+                        # When the deprecation ends, replace with:
+                        # order_by = None
+                        warnings.warn(
+                            "%s QuerySet won't use Meta.ordering in Django 3.1. "
+                            "Add .order_by('%s') to retain the current query." % (
+                                self.query.model.__name__,
+                                "', '".join(self._meta_ordering)
+                            ),
+                            RemovedInDjango31Warning,
+                            stacklevel=4,
+                        )
                 if having:
                     result.append('HAVING %s' % having)
                     params.extend(h_params)
@@ -983,20 +1011,7 @@ class SQLCompiler:
                 backend_converters = self.connection.ops.get_db_converters(expression)
                 field_converters = expression.get_db_converters(self.connection)
                 if backend_converters or field_converters:
-                    convs = []
-                    for conv in (backend_converters + field_converters):
-                        if func_supports_parameter(conv, 'context'):
-                            warnings.warn(
-                                'Remove the context parameter from %s.%s(). Support for it '
-                                'will be removed in Django 3.0.' % (
-                                    conv.__self__.__class__.__name__,
-                                    conv.__name__,
-                                ),
-                                RemovedInDjango30Warning,
-                            )
-                            conv = functools.partial(conv, context={})
-                        convs.append(conv)
-                    converters[i] = (convs, expression)
+                    converters[i] = (backend_converters + field_converters, expression)
         return converters
 
     def apply_converters(self, rows, converters):
@@ -1089,11 +1104,12 @@ class SQLCompiler:
             self.col_count if self.has_extra_select else None,
             chunk_size,
         )
-        if not chunked_fetch and not self.connection.features.can_use_chunked_reads:
+        if not chunked_fetch or not self.connection.features.can_use_chunked_reads:
             try:
                 # If we are using non-chunked reads, we return the same data
                 # structure as normally, but ensure it is all read into memory
-                # before going any further. Use chunked_fetch if requested.
+                # before going any further. Use chunked_fetch if requested,
+                # unless the database doesn't support it.
                 return list(result)
             finally:
                 # done with the cursor
@@ -1231,7 +1247,8 @@ class SQLInsertCompiler(SQLCompiler):
         # going to be column names (so we can avoid the extra overhead).
         qn = self.connection.ops.quote_name
         opts = self.query.get_meta()
-        result = ['INSERT INTO %s' % qn(opts.db_table)]
+        insert_statement = self.connection.ops.insert_statement(ignore_conflicts=self.query.ignore_conflicts)
+        result = ['%s %s' % (insert_statement, qn(opts.db_table))]
         fields = self.query.fields or [opts.pk]
         result.append('(%s)' % ', '.join(qn(f.column) for f in fields))
 
@@ -1253,13 +1270,18 @@ class SQLInsertCompiler(SQLCompiler):
 
         placeholder_rows, param_rows = self.assemble_as_sql(fields, value_rows)
 
-        if self.return_id and self.connection.features.can_return_id_from_insert:
-            if self.connection.features.can_return_ids_from_bulk_insert:
+        ignore_conflicts_suffix_sql = self.connection.ops.ignore_conflicts_suffix_sql(
+            ignore_conflicts=self.query.ignore_conflicts
+        )
+        if self.return_id and self.connection.features.can_return_columns_from_insert:
+            if self.connection.features.can_return_rows_from_bulk_insert:
                 result.append(self.connection.ops.bulk_insert_sql(fields, placeholder_rows))
                 params = param_rows
             else:
                 result.append("VALUES (%s)" % ", ".join(placeholder_rows[0]))
                 params = [param_rows[0]]
+            if ignore_conflicts_suffix_sql:
+                result.append(ignore_conflicts_suffix_sql)
             col = "%s.%s" % (qn(opts.db_table), qn(opts.pk.column))
             r_fmt, r_params = self.connection.ops.return_insert_id()
             # Skip empty r_fmt to allow subclasses to customize behavior for
@@ -1271,8 +1293,12 @@ class SQLInsertCompiler(SQLCompiler):
 
         if can_bulk:
             result.append(self.connection.ops.bulk_insert_sql(fields, placeholder_rows))
+            if ignore_conflicts_suffix_sql:
+                result.append(ignore_conflicts_suffix_sql)
             return [(" ".join(result), tuple(p for ps in param_rows for p in ps))]
         else:
+            if ignore_conflicts_suffix_sql:
+                result.append(ignore_conflicts_suffix_sql)
             return [
                 (" ".join(result + ["VALUES (%s)" % ", ".join(p)]), vals)
                 for p, vals in zip(placeholder_rows, param_rows)
@@ -1281,7 +1307,7 @@ class SQLInsertCompiler(SQLCompiler):
     def execute_sql(self, return_id=False):
         assert not (
             return_id and len(self.query.objs) != 1 and
-            not self.connection.features.can_return_ids_from_bulk_insert
+            not self.connection.features.can_return_rows_from_bulk_insert
         )
         self.return_id = return_id
         with self.connection.cursor() as cursor:
@@ -1289,9 +1315,9 @@ class SQLInsertCompiler(SQLCompiler):
                 cursor.execute(sql, params)
             if not return_id:
                 return
-            if self.connection.features.can_return_ids_from_bulk_insert and len(self.query.objs) > 1:
+            if self.connection.features.can_return_rows_from_bulk_insert and len(self.query.objs) > 1:
                 return self.connection.ops.fetch_returned_insert_ids(cursor)
-            if self.connection.features.can_return_id_from_insert:
+            if self.connection.features.can_return_columns_from_insert:
                 assert len(self.query.objs) == 1
                 return self.connection.ops.fetch_returned_insert_id(cursor)
             return self.connection.ops.last_insert_id(

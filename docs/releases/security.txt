@@ -863,7 +863,7 @@ March 6, 2018 - :cve:`2018-7536`
 
 Denial-of-service possibility in ``urlize`` and ``urlizetrunc`` template
 filters. `Full description
-<https://www.djangoproject.com/weblog/2018/mar/06/security-releases/>`_
+<https://www.djangoproject.com/weblog/2018/mar/06/security-releases/>`__
 
 Versions affected
 ~~~~~~~~~~~~~~~~~
@@ -877,7 +877,7 @@ March 6, 2018 - :cve:`2018-7537`
 
 Denial-of-service possibility in ``truncatechars_html`` and
 ``truncatewords_html`` template filters. `Full description
-<https://www.djangoproject.com/weblog/2018/mar/06/security-releases/>`_
+<https://www.djangoproject.com/weblog/2018/mar/06/security-releases/>`__
 
 Versions affected
 ~~~~~~~~~~~~~~~~~
@@ -885,3 +885,40 @@ Versions affected
 * Django 2.0 `(patch) <https://github.com/django/django/commit/94c5da1d17a6b0d378866c66b605102c19f7988c>`__
 * Django 1.11 `(patch) <https://github.com/django/django/commit/a91436360b79a6ff995c3e5018bcc666dfaf1539>`__
 * Django 1.8  `(patch) <https://github.com/django/django/commit/d17974a287a6ea2e361daff88fcc004cbd6835fa>`__
+
+August 1, 2018 - :cve:`2018-14574`
+----------------------------------
+
+Open redirect possibility in ``CommonMiddleware``. `Full description
+<https://www.djangoproject.com/weblog/2018/aug/01/security-releases/>`__
+
+Versions affected
+~~~~~~~~~~~~~~~~~
+
+* Django 2.1 `(patch) <https://github.com/django/django/commit/c4e5ff7fdb5fce447675e90291fd33fddd052b3c>`__
+* Django 2.0 `(patch) <https://github.com/django/django/commit/6fffc3c6d420e44f4029d5643f38d00a39b08525>`__
+* Django 1.11 `(patch) <https://github.com/django/django/commit/d6eaee092709aad477a9894598496c6deec532ff>`__
+
+October 1, 2018 - :cve:`2018-16984`
+-----------------------------------
+
+Password hash disclosure to "view only" admin users. `Full description
+<https://www.djangoproject.com/weblog/2018/oct/01/security-release/>`__
+
+Versions affected
+~~~~~~~~~~~~~~~~~
+
+* Django 2.1 `(patch) <https://github.com/django/django/commit/c4bd5b597e0aa2432e4c867b86650f18af117851>`__
+
+January 4, 2019 - :cve:`2019-3498`
+----------------------------------
+
+Content spoofing possibility in the default 404 page. `Full description
+<https://www.djangoproject.com/weblog/2019/jan/04/security-releases/>`__
+
+Versions affected
+~~~~~~~~~~~~~~~~~
+
+* Django 2.1 `(patch) <https://github.com/django/django/commit/64d2396e83aedba3fcc84ca40f23fbd22f0b9b5b>`__
+* Django 2.0 `(patch) <https://github.com/django/django/commit/9f4ed7c94c62e21644ef5115e393ac426b886f2e>`__
+* Django 1.11 `(patch) <https://github.com/django/django/commit/1cd00fcf52d089ef0fe03beabd05d59df8ea052a>`__

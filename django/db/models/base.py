@@ -16,7 +16,7 @@ from django.db import (
     connections, router, transaction,
 )
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.constraints import CheckConstraint
+from django.db.models.constraints import CheckConstraint, UniqueConstraint
 from django.db.models.deletion import CASCADE, Collector
 from django.db.models.fields.related import (
     ForeignObjectRel, OneToOneField, lazy_related_operation, resolve_relation,
@@ -28,7 +28,6 @@ from django.db.models.signals import (
     class_prepared, post_init, post_save, pre_init, pre_save,
 )
 from django.db.models.utils import make_model_tuple
-from django.utils.encoding import force_text
 from django.utils.text import capfirst, get_text_list
 from django.utils.translation import gettext_lazy as _
 from django.utils.version import get_version
@@ -59,6 +58,11 @@ def subclass_exception(name, bases, module, attached_to):
     })
 
 
+def _has_contribute_to_class(value):
+    # Only call contribute_to_class() if it's bound.
+    return not inspect.isclass(value) and hasattr(value, 'contribute_to_class')
+
+
 class ModelBase(type):
     """Metaclass for all models."""
     def __new__(cls, name, bases, attrs, **kwargs):
@@ -76,8 +80,15 @@ class ModelBase(type):
         classcell = attrs.pop('__classcell__', None)
         if classcell is not None:
             new_attrs['__classcell__'] = classcell
-        new_class = super_new(cls, name, bases, new_attrs, **kwargs)
         attr_meta = attrs.pop('Meta', None)
+        # Pass all attrs without a (Django-specific) contribute_to_class()
+        # method to type.__new__() so that they're properly initialized
+        # (i.e. __set_name__()).
+        for obj_name, obj in list(attrs.items()):
+            if not _has_contribute_to_class(obj):
+                new_attrs[obj_name] = attrs.pop(obj_name)
+        new_class = super_new(cls, name, bases, new_attrs, **kwargs)
+
         abstract = getattr(attr_meta, 'abstract', False)
         meta = attr_meta or getattr(new_class, 'Meta', None)
         base_meta = getattr(new_class, '_meta', None)
@@ -280,7 +291,8 @@ class ModelBase(type):
                         )
                 else:
                     field = copy.deepcopy(field)
-                    field.mti_inherited = True
+                    if not base._meta.abstract:
+                        field.mti_inherited = True
                     new_class.add_to_class(field.name, field)
 
         # Copy indexes so that index names are unique when models extend an
@@ -300,8 +312,7 @@ class ModelBase(type):
         return new_class
 
     def add_to_class(cls, name, value):
-        # We should call the contribute_to_class method only if it's bound
-        if not inspect.isclass(value) and hasattr(value, 'contribute_to_class'):
+        if _has_contribute_to_class(value):
             value.contribute_to_class(cls, name)
         else:
             setattr(cls, name, value)
@@ -581,7 +592,14 @@ class Model(metaclass=ModelBase):
         When accessing deferred fields of an instance, the deferred loading
         of the field will call this method.
         """
-        if fields is not None:
+        if fields is None:
+            self._prefetched_objects_cache = {}
+        else:
+            prefetched_objects_cache = getattr(self, '_prefetched_objects_cache', ())
+            for field in fields:
+                if field in prefetched_objects_cache:
+                    del prefetched_objects_cache[field]
+                    fields.remove(field)
             if not fields:
                 return
             if any(LOOKUP_SEP in f for f in fields):
@@ -669,9 +687,9 @@ class Model(metaclass=ModelBase):
                         "save() prohibited to prevent data loss due to "
                         "unsaved related object '%s'." % field.name
                     )
-                # If the relationship's pk was changed, clear the cached
-                # relationship.
-                if obj and obj.pk != getattr(self, field.attname):
+                # If the relationship's pk/to_field was changed, clear the
+                # cached relationship.
+                if obj and getattr(obj, field.target_field.attname) != getattr(self, field.attname):
                     field.delete_cached_value(self)
 
         using = using or router.db_for_write(self.__class__, instance=self)
@@ -742,7 +760,12 @@ class Model(metaclass=ModelBase):
                 sender=origin, instance=self, raw=raw, using=using,
                 update_fields=update_fields,
             )
-        with transaction.atomic(using=using, savepoint=False):
+        # A transaction isn't needed if one query is issued.
+        if meta.parents:
+            context_manager = transaction.atomic(using=using, savepoint=False)
+        else:
+            context_manager = transaction.mark_for_rollback_on_error(using=using)
+        with context_manager:
             parent_inserted = False
             if not raw:
                 parent_inserted = self._save_parents(cls, using, update_fields)
@@ -894,7 +917,7 @@ class Model(metaclass=ModelBase):
 
     def _get_FIELD_display(self, field):
         value = getattr(self, field.attname)
-        return force_text(dict(field.flatchoices).get(value, value), strings_only=True)
+        return dict(field.flatchoices).get(value, value)
 
     def _get_next_or_previous_by_FIELD(self, field, is_next, **kwargs):
         if not self.pk:
@@ -970,15 +993,26 @@ class Model(metaclass=ModelBase):
         unique_checks = []
 
         unique_togethers = [(self.__class__, self._meta.unique_together)]
+        constraints = [(self.__class__, self._meta.constraints)]
         for parent_class in self._meta.get_parent_list():
             if parent_class._meta.unique_together:
                 unique_togethers.append((parent_class, parent_class._meta.unique_together))
+            if parent_class._meta.constraints:
+                constraints.append((parent_class, parent_class._meta.constraints))
 
         for model_class, unique_together in unique_togethers:
             for check in unique_together:
                 if not any(name in exclude for name in check):
                     # Add the check if the field isn't excluded.
                     unique_checks.append((model_class, tuple(check)))
+
+        for model_class, model_constraints in constraints:
+            for constraint in model_constraints:
+                if (isinstance(constraint, UniqueConstraint) and
+                        # Partial unique constraints can't be validated.
+                        constraint.condition is None and
+                        not any(name in exclude for name in constraint.fields)):
+                    unique_checks.append((model_class, constraint.fields))
 
         # These are checks for the unique_for_<date/year/month>.
         date_checks = []
@@ -1293,12 +1327,13 @@ class Model(metaclass=ModelBase):
         fields = (f for f in fields if isinstance(f.remote_field.through, ModelBase))
 
         for f in fields:
-            signature = (f.remote_field.model, cls, f.remote_field.through)
+            signature = (f.remote_field.model, cls, f.remote_field.through, f.remote_field.through_fields)
             if signature in seen_intermediary_signatures:
                 errors.append(
                     checks.Error(
-                        "The model has two many-to-many relations through "
-                        "the intermediate model '%s'." % f.remote_field.through._meta.label,
+                        "The model has two identical many-to-many relations "
+                        "through the intermediate model '%s'." %
+                        f.remote_field.through._meta.label,
                         obj=cls,
                         id='models.E003',
                     )
@@ -1747,11 +1782,9 @@ def method_set_order(self, ordered_obj, id_list, using=None):
         using = DEFAULT_DB_ALIAS
     order_wrt = ordered_obj._meta.order_with_respect_to
     filter_args = order_wrt.get_forward_related_filter(self)
-    # FIXME: It would be nice if there was an "update many" version of update
-    # for situations like this.
-    with transaction.atomic(using=using, savepoint=False):
-        for i, j in enumerate(id_list):
-            ordered_obj.objects.filter(pk=j, **filter_args).update(_order=i)
+    ordered_obj.objects.db_manager(using).filter(**filter_args).bulk_update([
+        ordered_obj(pk=pk, _order=order) for order, pk in enumerate(id_list)
+    ], ['_order'])
 
 
 def method_get_order(self, ordered_obj):

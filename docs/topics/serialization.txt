@@ -99,7 +99,7 @@ attribute. The ``name`` attribute of the base class will be ignored.
 In order to fully serialize your ``Restaurant`` instances, you will need to
 serialize the ``Place`` models as well::
 
-    all_objects = list(Restaurant.objects.all()) + list(Place.objects.all())
+    all_objects = [*Restaurant.objects.all(), *Place.objects.all()]
     data = serializers.serialize('xml', all_objects)
 
 Deserializing data
@@ -165,7 +165,7 @@ Identifier  Information
 ==========  ==============================================================
 
 .. _json: https://json.org/
-.. _PyYAML: https://www.pyyaml.org/
+.. _PyYAML: https://pyyaml.org/
 
 XML
 ---
@@ -180,7 +180,7 @@ The basic XML serialization format is quite simple::
         </object>
     </django-objects>
 
-The whole collection of objects that is either serialized or de-serialized is
+The whole collection of objects that is either serialized or deserialized is
 represented by a ``<django-objects>``-tag which contains multiple
 ``<object>``-elements. Each such object has two attributes: "pk" and "model",
 the latter being represented by the name of the app ("sessions") and the
@@ -198,11 +198,11 @@ Foreign keys and other relational fields are treated a little bit differently::
         <!-- ... -->
     </object>
 
-In this example we specify that the auth.Permission object with the PK 27 has
-a foreign key to the contenttypes.ContentType instance with the PK 9.
+In this example we specify that the ``auth.Permission`` object with the PK 27
+has a foreign key to the ``contenttypes.ContentType`` instance with the PK 9.
 
 ManyToMany-relations are exported for the model that binds them. For instance,
-the auth.User model has such a relation to the auth.Permission model::
+the ``auth.User`` model has such a relation to the ``auth.Permission`` model::
 
     <object pk="1" model="auth.user">
         <!-- ... -->
@@ -404,12 +404,11 @@ name::
             return self.get(first_name=first_name, last_name=last_name)
 
     class Person(models.Model):
-        objects = PersonManager()
-
         first_name = models.CharField(max_length=100)
         last_name = models.CharField(max_length=100)
-
         birthdate = models.DateField()
+
+        objects = PersonManager()
 
         class Meta:
             unique_together = (('first_name', 'last_name'),)
@@ -453,18 +452,17 @@ So how do you get Django to emit a natural key when serializing an object?
 Firstly, you need to add another method -- this time to the model itself::
 
     class Person(models.Model):
-        objects = PersonManager()
-
         first_name = models.CharField(max_length=100)
         last_name = models.CharField(max_length=100)
-
         birthdate = models.DateField()
 
-        def natural_key(self):
-            return (self.first_name, self.last_name)
+        objects = PersonManager()
 
         class Meta:
             unique_together = (('first_name', 'last_name'),)
+
+        def natural_key(self):
+            return (self.first_name, self.last_name)
 
 That method should always return a natural key tuple -- in this
 example, ``(first name, last name)``. Then, when you call

@@ -335,7 +335,7 @@ Connector/Python includes `its own`_.
 mysqlclient
 ~~~~~~~~~~~
 
-Django requires `mysqlclient`_ 1.3.7 or later.
+Django requires `mysqlclient`_ 1.3.13 or later.
 
 MySQL Connector/Python
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -415,10 +415,10 @@ Refer to the :doc:`settings documentation </ref/settings>`.
 
 Connection settings are used in this order:
 
-1. :setting:`OPTIONS`.
-2. :setting:`NAME`, :setting:`USER`, :setting:`PASSWORD`,
-   :setting:`HOST`, :setting:`PORT`
-3. MySQL option files.
+#. :setting:`OPTIONS`.
+#. :setting:`NAME`, :setting:`USER`, :setting:`PASSWORD`, :setting:`HOST`,
+   :setting:`PORT`
+#. MySQL option files.
 
 In other words, if you set the name of the database in :setting:`OPTIONS`,
 this will take precedence over :setting:`NAME`, which would override
@@ -627,6 +627,8 @@ appropriate typecasting.
 SQLite notes
 ============
 
+Django supports SQLite 3.8.3 and later.
+
 SQLite_ provides an excellent development alternative for applications that
 are predominantly read-only or require a smaller installation footprint. As
 with all database servers, though, there are some differences that are
@@ -710,13 +712,26 @@ can use the "pyformat" parameter style, where placeholders in the query
 are given as ``'%(name)s'`` and the parameters are passed as a dictionary
 rather than a list. SQLite does not support this.
 
+.. _sqlite-isolation:
+
+Isolation when using ``QuerySet.iterator()``
+--------------------------------------------
+
+There are special considerations described in `Isolation In SQLite`_ when
+modifying a table while iterating over it using :meth:`.QuerySet.iterator`. If
+a row is added, changed, or deleted within the loop, then that row may or may
+not appear, or may appear twice, in subsequent results fetched from the
+iterator. Your code must handle this.
+
+.. _`Isolation in SQLite`: https://sqlite.org/isolation.html
+
 .. _oracle-notes:
 
 Oracle notes
 ============
 
 Django supports `Oracle Database Server`_ versions 12.1 and higher. Version
-5.2 or higher of the `cx_Oracle`_ Python driver is required.
+6.0 or higher of the `cx_Oracle`_ Python driver is required.
 
 .. _`Oracle Database Server`: https://www.oracle.com/
 .. _`cx_Oracle`: https://oracle.github.io/python-cx_Oracle/
@@ -749,9 +764,10 @@ and a user granted ``RESOURCE WITH ADMIN OPTION`` can grant ``RESOURCE``, such
 a user cannot grant the individual privileges (e.g. ``CREATE TABLE``), and thus
 ``RESOURCE WITH ADMIN OPTION`` is not usually sufficient for running tests.
 
-Some test suites also create views; to run these, the user also needs
-the ``CREATE VIEW WITH ADMIN OPTION`` privilege. In particular, this is needed
-for Django's own test suite.
+Some test suites also create views or materialized views; to run these, the
+user also needs ``CREATE VIEW WITH ADMIN OPTION`` and
+``CREATE MATERIALIZED VIEW WITH ADMIN OPTION`` privileges. In particular, this
+is needed for Django's own test suite.
 
 All of these privileges are included in the DBA role, which is appropriate
 for use on a private developer's database.
@@ -803,6 +819,24 @@ and want to connect using the SID ("xe" in this example), then fill in both
 You should either supply both :setting:`HOST` and :setting:`PORT`, or leave
 both as empty strings. Django will use a different connect descriptor depending
 on that choice.
+
+Full DSN and Easy Connect
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A Full DSN or Easy Connect string can be used in :setting:`NAME` if both
+:setting:`HOST` and :setting:`PORT` are empty. This format is required when
+using RAC or pluggable databases without ``tnsnames.ora``, for example.
+
+Example of an Easy Connect string::
+
+    'NAME': 'localhost:1521/orclpdb1',
+
+Example of a full DSN string::
+
+    'NAME': (
+        '(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=localhost)(PORT=1521))'
+        '(CONNECT_DATA=(SERVICE_NAME=orclpdb1)))'
+    ),
 
 Threaded option
 ----------------
@@ -865,6 +899,8 @@ occur when an Oracle datatype is used as a column name.  In
 particular, take care to avoid using the names ``date``,
 ``timestamp``, ``number`` or ``float`` as a field name.
 
+.. _oracle-null-empty-strings:
+
 NULL and empty strings
 ----------------------
 
@@ -914,6 +950,6 @@ the support channels provided by each 3rd party project.
 
 .. _SAP SQL Anywhere: https://github.com/sqlanywhere/sqlany-django
 .. _IBM DB2: https://pypi.org/project/ibm_db/
-.. _Microsoft SQL Server: https://django-mssql.readthedocs.io/en/latest/
+.. _Microsoft SQL Server: https://pypi.org/project/django-pyodbc-azure/
 .. _Firebird: https://github.com/maxirobaina/django-firebird
 .. _ODBC: https://github.com/lionheart/django-pyodbc/

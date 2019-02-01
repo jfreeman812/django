@@ -173,6 +173,17 @@ Example usage::
     django-admin compilemessages -x pt_BR
     django-admin compilemessages -x pt_BR -x fr
 
+.. django-admin-option:: --ignore PATTERN, -i PATTERN
+
+.. versionadded:: 3.0
+
+Ignores directories matching the given :mod:`glob`-style pattern. Use
+multiple times to ignore more.
+
+Example usage::
+
+    django-admin compilemessages --ignore=cache --ignore=outdated/*/locale
+
 ``createcachetable``
 --------------------
 
@@ -352,7 +363,8 @@ file) to standard output.
 
 You may choose what tables or views to inspect by passing their names as
 arguments. If no arguments are provided, models are created for views only if
-the :option:`--include-views` option is used.
+the :option:`--include-views` option is used. Models for partition tables are
+created on PostgreSQL if the :option:`--include-partitions` option is used.
 
 Use this if you have a legacy database with which you'd like to use Django.
 The script will inspect the database and create a model for each table within
@@ -383,13 +395,6 @@ you run it, you'll want to look over the generated models yourself to make
 customizations. In particular, you'll need to rearrange models' order, so that
 models that refer to other models are ordered properly.
 
-Primary keys are automatically introspected for PostgreSQL, MySQL and
-SQLite, in which case Django puts in the ``primary_key=True`` where
-needed.
-
-``inspectdb`` works with PostgreSQL, MySQL and SQLite. Foreign-key detection
-only works in PostgreSQL and with certain types of MySQL tables.
-
 Django doesn't create database defaults when a
 :attr:`~django.db.models.Field.default` is specified on a model field.
 Similarly, database defaults aren't translated to model field defaults or
@@ -402,13 +407,41 @@ table's lifecycle, you'll need to change the
 :attr:`~django.db.models.Options.managed` option to ``True`` (or simply remove
 it because ``True`` is its default value).
 
+Database-specific notes
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Oracle
+^^^^^^
+
+* Models are created for materialized views if :option:`--include-views` is
+  used.
+
+PostgreSQL
+^^^^^^^^^^
+
+* Models are created for foreign tables.
+* Models are created for materialized views if
+  :option:`--include-views` is used.
+* Models are created for partition tables if
+  :option:`--include-partitions` is used.
+
+.. versionchanged:: 2.2
+
+    Support for foreign tables and materialized views was added.
+
 .. django-admin-option:: --database DATABASE
 
 Specifies the database to introspect. Defaults to ``default``.
 
-.. django-admin-option:: --include-views
+.. django-admin-option:: --include-partitions
 
-.. versionadded:: 2.1
+.. versionadded:: 2.2
+
+If this option is provided, models are also created for partitions.
+
+Only support for PostgreSQL is implemented.
+
+.. django-admin-option:: --include-views
 
 If this option is provided, models are also created for database views.
 
@@ -606,8 +639,7 @@ the :ref:`i18n documentation <how-to-create-language-files>` for details.
 
 This command doesn't require configured settings. However, when settings aren't
 configured, the command can't ignore the :setting:`MEDIA_ROOT` and
-:setting:`STATIC_ROOT` directories or include :setting:`LOCALE_PATHS`. It will
-also write files in UTF-8 rather than in :setting:`FILE_CHARSET`.
+:setting:`STATIC_ROOT` directories or include :setting:`LOCALE_PATHS`.
 
 .. django-admin-option:: --all, -a
 
@@ -750,7 +782,14 @@ Enables fixing of migration conflicts.
 
 .. django-admin-option:: --name NAME, -n NAME
 
-Allows naming the generated migration(s) instead of using a generated name.
+Allows naming the generated migration(s) instead of using a generated name. The
+name must be a valid Python :ref:`identifier <python:identifiers>`.
+
+.. django-admin-option:: --no-header
+
+.. versionadded:: 2.2
+
+Generate migration files without Django version and timestamp header.
 
 .. django-admin-option:: --check
 
@@ -804,6 +843,13 @@ option does not, however, check for matching database schema beyond matching
 table names and so is only safe to use if you are confident that your existing
 schema matches what is recorded in your initial migration.
 
+.. django-admin-option:: --plan
+
+.. versionadded:: 2.2
+
+Shows the migration operations that will be performed for the given ``migrate``
+command.
+
 .. django-admin-option:: --run-syncdb
 
 Allows creating tables for apps without migrations. While this isn't
@@ -842,13 +888,26 @@ needed. You don't need to restart the server for code changes to take effect.
 However, some actions like adding files don't trigger a restart, so you'll
 have to restart the server in these cases.
 
-If you are using Linux and install `pyinotify`_, kernel signals will be used to
-autoreload the server (rather than polling file modification timestamps each
-second). This offers better scaling to large projects, reduction in response
-time to code modification, more robust change detection, and battery usage
-reduction.
+If you're using Linux or MacOS and install both `pywatchman`_ and the
+`Watchman`_ service, kernel signals will be used to autoreload the server
+(rather than polling file modification timestamps each second). This offers
+better performance on large projects, reduced response time after code changes,
+more robust change detection, and a reduction in power usage.
 
-.. _pyinotify: https://pypi.org/project/pyinotify/
+.. admonition:: Large directories with many files may cause performance issues
+
+    When using Watchman with a project that includes large non-Python
+    directories like ``node_modules``, it's advisable to ignore this directory
+    for optimal performance. See the `watchman documentation`_ for information
+    on how to do this.
+
+.. _Watchman: https://facebook.github.io/watchman/
+.. _pywatchman: https://pypi.org/project/pywatchman/
+.. _watchman documentation: https://facebook.github.io/watchman/docs/config.html#ignore_dirs
+
+.. versionchanged:: 2.2
+
+   Watchman support replaced support for `pyinotify`.
 
 When you start the server, and each time you change Python code while the
 server is running, the system check framework will check your entire Django
@@ -1125,6 +1184,12 @@ Suppresses all user prompts.
 Sets the name of the squashed migration. When omitted, the name is based on the
 first and last migration, with ``_squashed_`` in between.
 
+.. django-admin-option:: --no-header
+
+.. versionadded:: 2.2
+
+Generate squashed migration file without Django version and timestamp header.
+
 ``startapp``
 ------------
 
@@ -1386,10 +1451,10 @@ For example, this command::
 
 ...would perform the following steps:
 
-1. Create a test database, as described in :ref:`the-test-database`.
-2. Populate the test database with fixture data from the given fixtures.
+#. Create a test database, as described in :ref:`the-test-database`.
+#. Populate the test database with fixture data from the given fixtures.
    (For more on fixtures, see the documentation for :djadmin:`loaddata` above.)
-3. Runs the Django development server (as in :djadmin:`runserver`), pointed at
+#. Runs the Django development server (as in :djadmin:`runserver`), pointed at
    this newly created test database instead of your production database.
 
 This is useful in a number of ways:
@@ -1601,7 +1666,7 @@ Example usage::
 
     django-admin migrate --pythonpath='/home/djangoprojects/myproject'
 
-.. _import search path: http://www.diveintopython3.net/your-first-python-program.html#importsearchpath
+.. _import search path: https://www.diveinto.org/python3/your-first-python-program.html#importsearchpath
 
 .. django-admin-option:: --settings SETTINGS
 
@@ -1650,6 +1715,14 @@ Example usage::
 
     django-admin runserver --no-color
 
+.. django-admin-option:: --force-color
+
+.. versionadded:: 2.2
+
+Forces colorization of the command output if it would otherwise be disabled
+as discussed in :ref:`syntax-coloring`. For example, you may want to pipe
+colored output to another command.
+
 Extra niceties
 ==============
 
@@ -1661,7 +1734,7 @@ Syntax coloring
 The ``django-admin`` / ``manage.py`` commands will use pretty
 color-coded output if your terminal supports ANSI-colored output. It
 won't use the color codes if you're piping the command's output to
-another program.
+another program unless the :option:`--force-color` option is used.
 
 Under Windows, the native console doesn't support ANSI escape sequences so by
 default there is no color output. But you can install the `ANSICON`_

@@ -7,7 +7,6 @@ import tempfile
 from io import StringIO
 from pathlib import Path
 
-from django.conf.urls import url
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import DatabaseError, connection
@@ -15,10 +14,9 @@ from django.shortcuts import render
 from django.template import TemplateDoesNotExist
 from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.test.utils import LoggingCaptureMixin
-from django.urls import reverse
+from django.urls import path, reverse
 from django.utils.functional import SimpleLazyObject
 from django.utils.safestring import mark_safe
-from django.utils.version import PY36
 from django.views.debug import (
     CLEANSED_SUBSTITUTE, CallableSettingWrapper, ExceptionReporter,
     cleanse_setting, technical_500_response,
@@ -38,7 +36,7 @@ class User:
 
 
 class WithoutEmptyPathUrls:
-    urlpatterns = [url(r'url/$', index_page, name='url')]
+    urlpatterns = [path('url/', index_page, name='url')]
 
 
 class CallableSettingWrapperTests(SimpleTestCase):
@@ -105,9 +103,6 @@ class DebugViewTests(SimpleTestCase):
     def test_404(self):
         response = self.client.get('/raises404/')
         self.assertEqual(response.status_code, 404)
-
-    def test_raised_404(self):
-        response = self.client.get('/views/raises404/')
         self.assertContains(response, "<code>not-in-urls</code>, didn't match", status_code=404)
 
     def test_404_not_in_urls(self):
@@ -128,12 +123,12 @@ class DebugViewTests(SimpleTestCase):
         self.assertContains(response, "The empty path didn't match any of these.", status_code=404)
 
     def test_technical_404(self):
-        response = self.client.get('/views/technical404/')
+        response = self.client.get('/technical404/')
         self.assertContains(response, "Raised by:", status_code=404)
         self.assertContains(response, "view_tests.views.technical404", status_code=404)
 
     def test_classbased_technical_404(self):
-        response = self.client.get('/views/classbased404/')
+        response = self.client.get('/classbased404/')
         self.assertContains(response, "Raised by:", status_code=404)
         self.assertContains(response, "view_tests.views.Http404View", status_code=404)
 
@@ -229,7 +224,7 @@ class DebugViewTests(SimpleTestCase):
 
 class DebugViewQueriesAllowedTests(SimpleTestCase):
     # May need a query to initialize MySQL connection
-    allow_database_queries = True
+    databases = {'default'}
 
     def test_handle_db_exception(self):
         """
@@ -519,7 +514,7 @@ class ExceptionReporterTests(SimpleTestCase):
             exc_type, exc_value, tb = sys.exc_info()
         reporter = ExceptionReporter(request, exc_type, exc_value, tb)
         html = reporter.get_traceback_html()
-        self.assertInHTML('<h1>%sError at /test_view/</h1>' % ('ModuleNotFound' if PY36 else 'Import'), html)
+        self.assertInHTML('<h1>ModuleNotFoundError at /test_view/</h1>', html)
 
     def test_ignore_traceback_evaluation_exceptions(self):
         """
@@ -732,14 +727,14 @@ class PlainTextReportTests(SimpleTestCase):
 
 
 class ExceptionReportTestMixin:
-
     # Mixin used in the ExceptionReporterFilterTests and
     # AjaxResponseExceptionReporterFilter tests below
-
-    breakfast_data = {'sausage-key': 'sausage-value',
-                      'baked-beans-key': 'baked-beans-value',
-                      'hash-brown-key': 'hash-brown-value',
-                      'bacon-key': 'bacon-value'}
+    breakfast_data = {
+        'sausage-key': 'sausage-value',
+        'baked-beans-key': 'baked-beans-value',
+        'hash-brown-key': 'hash-brown-value',
+        'bacon-key': 'bacon-value',
+    }
 
     def verify_unsafe_response(self, view, check_for_vars=True,
                                check_for_POST_params=True):

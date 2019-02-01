@@ -3,7 +3,6 @@ import calendar
 import datetime
 import re
 import unicodedata
-import warnings
 from binascii import Error as BinasciiError
 from email.utils import formatdate
 from urllib.parse import (
@@ -14,8 +13,6 @@ from urllib.parse import (
 
 from django.core.exceptions import TooManyFieldsSent
 from django.utils.datastructures import MultiValueDict
-from django.utils.deprecation import RemovedInDjango30Warning
-from django.utils.encoding import force_bytes
 from django.utils.functional import keep_lazy_text
 
 # based on RFC 7232, Appendix C
@@ -92,41 +89,33 @@ def urlencode(query, doseq=False):
         query = query.items()
     query_params = []
     for key, value in query:
-        if isinstance(value, (str, bytes)):
+        if value is None:
+            raise TypeError(
+                'Cannot encode None in a query string. Did you mean to pass '
+                'an empty string or omit the value?'
+            )
+        elif isinstance(value, (str, bytes)):
             query_val = value
         else:
             try:
-                iter(value)
+                itr = iter(value)
             except TypeError:
                 query_val = value
             else:
                 # Consume generators and iterators, even when doseq=True, to
                 # work around https://bugs.python.org/issue31706.
-                query_val = [
-                    item if isinstance(item, bytes) else str(item)
-                    for item in value
-                ]
+                query_val = []
+                for item in itr:
+                    if item is None:
+                        raise TypeError(
+                            'Cannot encode None in a query string. Did you '
+                            'mean to pass an empty string or omit the value?'
+                        )
+                    elif not isinstance(item, bytes):
+                        item = str(item)
+                    query_val.append(item)
         query_params.append((key, query_val))
     return original_urlencode(query_params, doseq)
-
-
-def cookie_date(epoch_seconds=None):
-    """
-    Format the time to ensure compatibility with Netscape's cookie standard.
-
-    `epoch_seconds` is a floating point number expressed in seconds since the
-    epoch, in UTC - such as that outputted by time.time(). If set to None, it
-    defaults to the current time.
-
-    Output a string in the format 'Wdy, DD-Mon-YYYY HH:MM:SS GMT'.
-    """
-    warnings.warn(
-        'cookie_date() is deprecated in favor of http_date(), which follows '
-        'the format of the latest RFC.',
-        RemovedInDjango30Warning, stacklevel=2,
-    )
-    rfcdate = formatdate(epoch_seconds)
-    return '%s-%s-%s GMT' % (rfcdate[:7], rfcdate[8:11], rfcdate[12:25])
 
 
 def http_date(epoch_seconds=None):
@@ -220,10 +209,10 @@ def int_to_base36(i):
 
 def urlsafe_base64_encode(s):
     """
-    Encode a bytestring in base64 for use in URLs. Strip any trailing equal
-    signs.
+    Encode a bytestring to a base64 string for use in URLs. Strip any trailing
+    equal signs.
     """
-    return base64.urlsafe_b64encode(s).rstrip(b'\n=')
+    return base64.urlsafe_b64encode(s).rstrip(b'\n=').decode('ascii')
 
 
 def urlsafe_base64_decode(s):
@@ -231,7 +220,7 @@ def urlsafe_base64_decode(s):
     Decode a base64 encoded string. Add back any trailing equal signs that
     might have been stripped.
     """
-    s = force_bytes(s)
+    s = s.encode()
     try:
         return base64.urlsafe_b64decode(s.ljust(len(s) + len(s) % 4, b'='))
     except (LookupError, BinasciiError) as e:
@@ -435,3 +424,14 @@ def limited_parse_qsl(qs, keep_blank_values=False, encoding='utf-8',
             value = unquote(value, encoding=encoding, errors=errors)
             r.append((name, value))
     return r
+
+
+def escape_leading_slashes(url):
+    """
+    If redirecting to an absolute path (two leading slashes), a slash must be
+    escaped to prevent browsers from handling the path as schemaless and
+    redirecting to another host.
+    """
+    if url.startswith('//'):
+        url = '/%2F{}'.format(url[2:])
+    return url

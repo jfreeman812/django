@@ -80,7 +80,7 @@ class ParameterHandlingTest(TestCase):
         "An executemany call with too many/not enough parameters will raise an exception (Refs #12612)"
         with connection.cursor() as cursor:
             query = ('INSERT INTO %s (%s, %s) VALUES (%%s, %%s)' % (
-                connection.introspection.table_name_converter('backends_square'),
+                connection.introspection.identifier_converter('backends_square'),
                 connection.ops.quote_name('root'),
                 connection.ops.quote_name('square')
             ))
@@ -217,7 +217,7 @@ class BackendTestCase(TransactionTestCase):
 
     def create_squares(self, args, paramstyle, multiple):
         opts = Square._meta
-        tbl = connection.introspection.table_name_converter(opts.db_table)
+        tbl = connection.introspection.identifier_converter(opts.db_table)
         f1 = connection.ops.quote_name(opts.get_field('root').column)
         f2 = connection.ops.quote_name(opts.get_field('square').column)
         if paramstyle == 'format':
@@ -303,7 +303,7 @@ class BackendTestCase(TransactionTestCase):
                 'SELECT %s, %s FROM %s ORDER BY %s' % (
                     qn(f3.column),
                     qn(f4.column),
-                    connection.introspection.table_name_converter(opts2.db_table),
+                    connection.introspection.identifier_converter(opts2.db_table),
                     qn(f3.column),
                 )
             )
@@ -340,7 +340,6 @@ class BackendTestCase(TransactionTestCase):
 
     def test_cached_db_features(self):
         self.assertIn(connection.features.supports_transactions, (True, False))
-        self.assertIn(connection.features.supports_stddev, (True, False))
         self.assertIn(connection.features.can_introspect_foreign_keys, (True, False))
 
     def test_duplicate_table_error(self):
@@ -455,13 +454,8 @@ class BackendTestCase(TransactionTestCase):
             connection.init_connection_state()
 
 
-# We don't make these tests conditional because that means we would need to
-# check and differentiate between:
-# * MySQL+InnoDB, MySQL+MYISAM (something we currently can't do).
-# * if sqlite3 (if/once we get #14204 fixed) has referential integrity turned
-#   on or not, something that would be controlled by runtime support and user
-#   preference.
-# verify if its type is django.database.db.IntegrityError.
+# These tests aren't conditional because it would require differentiating
+# between MySQL+InnoDB and MySQL+MYISAM (something we currently can't do).
 class FkConstraintsTests(TransactionTestCase):
 
     available_apps = ['backends']

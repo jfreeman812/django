@@ -271,7 +271,6 @@ class Command(BaseCommand):
                         # unmodified files.
                         can_skip_unmodified_files = not (self.symlink ^ os.path.islink(full_path))
                     else:
-                        full_path = None
                         # In remote storages, skipping is only based on the
                         # modified times since symlinks aren't relevant.
                         can_skip_unmodified_files = True
@@ -311,10 +310,7 @@ class Command(BaseCommand):
         else:
             self.log("Linking '%s'" % source_path, level=2)
             full_path = self.storage.path(prefixed_path)
-            try:
-                os.makedirs(os.path.dirname(full_path))
-            except OSError:
-                pass
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
             try:
                 if os.path.lexists(full_path):
                     os.unlink(full_path)

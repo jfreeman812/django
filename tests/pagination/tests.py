@@ -1,18 +1,18 @@
-import unittest
 import warnings
 from datetime import datetime
 
 from django.core.paginator import (
-    EmptyPage, InvalidPage, PageNotAnInteger, Paginator,
+    EmptyPage, InvalidPage, PageNotAnInteger, Paginator, QuerySetPaginator,
     UnorderedObjectListWarning,
 )
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
+from django.utils.deprecation import RemovedInDjango31Warning
 
 from .custom import ValidAdjacentNumsPaginator
 from .models import Article
 
 
-class PaginationTests(unittest.TestCase):
+class PaginationTests(SimpleTestCase):
     """
     Tests for the Paginator and Page classes.
     """
@@ -151,6 +151,22 @@ class PaginationTests(unittest.TestCase):
         self.assertEqual(5, paginator.num_pages)
         self.assertEqual([1, 2, 3, 4, 5], list(paginator.page_range))
 
+    def test_count_does_not_silence_attribute_error(self):
+        class AttributeErrorContainer:
+            def count(self):
+                raise AttributeError('abc')
+
+        with self.assertRaisesMessage(AttributeError, 'abc'):
+            Paginator(AttributeErrorContainer(), 10).count()
+
+    def test_count_does_not_silence_type_error(self):
+        class TypeErrorContainer:
+            def count(self):
+                raise TypeError('abc')
+
+        with self.assertRaisesMessage(TypeError, 'abc'):
+            Paginator(TypeErrorContainer(), 10).count()
+
     def check_indexes(self, params, page_num, indexes):
         """
         Helper method that instantiates a Paginator object from the passed
@@ -282,12 +298,19 @@ class PaginationTests(unittest.TestCase):
         with self.assertRaises(EmptyPage):
             paginator.get_page(1)
 
+    def test_querysetpaginator_deprecation(self):
+        msg = 'The QuerySetPaginator alias of Paginator is deprecated.'
+        with self.assertWarnsMessage(RemovedInDjango31Warning, msg) as cm:
+            QuerySetPaginator([], 1)
+        self.assertEqual(cm.filename, __file__)
+
 
 class ModelPaginationTests(TestCase):
     """
     Test pagination with Django model instances
     """
-    def setUp(self):
+    @classmethod
+    def setUpTestData(cls):
         # Prepare a list of objects for pagination.
         for x in range(1, 10):
             a = Article(headline='Article %s' % x, pub_date=datetime(2005, 7, 29))
@@ -376,7 +399,7 @@ class ModelPaginationTests(TestCase):
 
     def test_paginating_unordered_object_list_raises_warning(self):
         """
-        Unordered object list warning with an object that has an orderd
+        Unordered object list warning with an object that has an ordered
         attribute but not a model attribute.
         """
         class ObjectList:

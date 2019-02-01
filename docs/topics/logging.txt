@@ -148,7 +148,7 @@ by a name. This name is used to identify the logger for configuration
 purposes.
 
 By convention, the logger name is usually ``__name__``, the name of
-the python module that contains the logger. This allows you to filter
+the Python module that contains the logger. This allows you to filter
 and handle logging calls on a per-module basis. However, if you have
 some other way of organizing your logging messages, you can provide
 any dot-separated name to identify your logger::
@@ -429,8 +429,8 @@ configuration process for :ref:`Django's default logging
 <default-logging-configuration>`. Here's an example that disables Django's
 logging configuration and then manually configures logging:
 
-.. snippet::
-    :filename: settings.py
+.. code-block:: python
+    :caption: settings.py
 
     LOGGING_CONFIG = None
 
@@ -745,6 +745,11 @@ Independent of the value of :setting:`DEBUG`:
 
 * The :ref:`django-server-logger` logger sends messages at the ``INFO`` level
   or higher to the console.
+
+All loggers except :ref:`django-server-logger` propagate logging to their
+parents, up to the root ``django`` logger. The ``console`` and ``mail_admins``
+handlers are attached to the root logger to provide the behavior described
+above.
 
 See also :ref:`Configuring logging <configuring-logging>` to learn how you can
 complement or replace this default logging configuration.

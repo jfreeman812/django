@@ -148,11 +148,6 @@ And on databases that support distinct on fields (such as PostgreSQL),
 
     SELECT ... DISTINCT ON ABS("experiments"."change")
 
-.. versionchanged:: 2.1
-
-    Ordering and distinct support as described in the last two paragraphs was
-    added.
-
 When looking for which lookups are allowable after the ``Transform`` has been
 applied, Django uses the ``output_field`` attribute. We didn't need to specify
 this here as it didn't change, but supposing we were applying ``AbsoluteValue``
@@ -275,7 +270,7 @@ We can change the behavior on a specific backend by creating a subclass of
 ``NotEqual`` with an ``as_mysql`` method::
 
   class MySQLNotEqual(NotEqual):
-      def as_mysql(self, compiler, connection):
+      def as_mysql(self, compiler, connection, **extra_context):
           lhs, lhs_params = self.process_lhs(compiler, connection)
           rhs, rhs_params = self.process_rhs(compiler, connection)
           params = lhs_params + rhs_params

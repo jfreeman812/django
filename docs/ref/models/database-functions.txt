@@ -149,6 +149,25 @@ will result in a database error.
     The PostgreSQL behavior can be emulated using ``Coalesce`` if you know
     a sensible maximum value to provide as a default.
 
+``NullIf``
+----------
+
+.. class:: NullIf(expression1, expression2)
+
+.. versionadded:: 2.2
+
+Accepts two expressions and returns ``None`` if they are equal, otherwise
+returns ``expression1``.
+
+.. admonition:: Caveats on Oracle
+
+    Due to an :ref:`Oracle convention<oracle-null-empty-strings>`, this
+    function returns the empty string instead of ``None`` when the expressions
+    are of type :class:`~django.db.models.CharField`.
+
+    Passing ``Value(None)`` to ``expression1`` is prohibited on Oracle since
+    Oracle doesn't accept ``NULL`` as the first argument.
+
 .. _date-functions:
 
 Date functions
@@ -182,6 +201,7 @@ Given the datetime ``2015-06-15 23:30:01.000321+00:00``, the built-in
 ``lookup_name``\s return:
 
 * "year": 2015
+* "iso_year": 2015
 * "quarter": 2
 * "month": 6
 * "day": 15
@@ -252,6 +272,14 @@ Usage example::
 
     .. attribute:: lookup_name = 'year'
 
+.. class:: ExtractIsoYear(expression, tzinfo=None, **extra)
+
+    .. versionadded:: 2.2
+
+    Returns the ISO-8601 week-numbering year.
+
+    .. attribute:: lookup_name = 'iso_year'
+
 .. class:: ExtractMonth(expression, tzinfo=None, **extra)
 
     .. attribute:: lookup_name = 'month'
@@ -283,7 +311,7 @@ that deal with date-parts can be used with ``DateField``::
     >>> from django.utils import timezone
     >>> from django.db.models.functions import (
     ...     ExtractDay, ExtractMonth, ExtractQuarter, ExtractWeek,
-    ...     ExtractWeekDay, ExtractYear,
+    ...     ExtractWeekDay, ExtractIsoYear, ExtractYear,
     ... )
     >>> start_2015 = datetime(2015, 6, 15, 23, 30, 1, tzinfo=timezone.utc)
     >>> end_2015 = datetime(2015, 6, 16, 13, 11, 27, tzinfo=timezone.utc)
@@ -292,15 +320,17 @@ that deal with date-parts can be used with ``DateField``::
     ...    end_datetime=end_2015, end_date=end_2015.date())
     >>> Experiment.objects.annotate(
     ...     year=ExtractYear('start_date'),
+    ...     isoyear=ExtractIsoYear('start_date'),
     ...     quarter=ExtractQuarter('start_date'),
     ...     month=ExtractMonth('start_date'),
     ...     week=ExtractWeek('start_date'),
     ...     day=ExtractDay('start_date'),
     ...     weekday=ExtractWeekDay('start_date'),
-    ... ).values('year', 'quarter', 'month', 'week', 'day', 'weekday').get(
+    ... ).values('year', 'isoyear', 'quarter', 'month', 'week', 'day', 'weekday').get(
     ...     end_date__year=ExtractYear('start_date'),
     ... )
-    {'year': 2015, 'quarter': 2, 'month': 6, 'week': 25, 'day': 15, 'weekday': 2}
+    {'year': 2015, 'isoyear': 2015, 'quarter': 2, 'month': 6, 'week': 25,
+     'day': 15, 'weekday': 2}
 
 ``DateTimeField`` extracts
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -340,6 +370,7 @@ Each class is also a ``Transform`` registered on ``DateTimeField`` as
     ...    end_datetime=end_2015, end_date=end_2015.date())
     >>> Experiment.objects.annotate(
     ...     year=ExtractYear('start_datetime'),
+    ...     isoyear=ExtractIsoYear('start_datetime'),
     ...     quarter=ExtractQuarter('start_datetime'),
     ...     month=ExtractMonth('start_datetime'),
     ...     week=ExtractWeek('start_datetime'),
@@ -349,10 +380,11 @@ Each class is also a ``Transform`` registered on ``DateTimeField`` as
     ...     minute=ExtractMinute('start_datetime'),
     ...     second=ExtractSecond('start_datetime'),
     ... ).values(
-    ...     'year', 'month', 'week', 'day', 'weekday', 'hour', 'minute', 'second',
+    ...     'year', 'isoyear', 'month', 'week', 'day',
+    ...     'weekday', 'hour', 'minute', 'second',
     ... ).get(end_datetime__year=ExtractYear('start_datetime'))
-    {'year': 2015, 'quarter': 2, 'month': 6, 'week': 25, 'day': 15, 'weekday': 2,
-     'hour': 23, 'minute': 30, 'second': 1}
+    {'year': 2015, 'isoyear': 2015, 'quarter': 2, 'month': 6, 'week': 25,
+     'day': 15, 'weekday': 2, 'hour': 23, 'minute': 30, 'second': 1}
 
 When :setting:`USE_TZ` is ``True`` then datetimes are stored in the database
 in UTC. If a different timezone is active in Django, the datetime is converted
@@ -502,8 +534,6 @@ Usage example::
     .. attribute:: kind = 'month'
 
 .. class:: TruncWeek(expression, output_field=None, tzinfo=None, **extra)
-
-    .. versionadded:: 2.1
 
     Truncates to midnight on the Monday of the week.
 
@@ -1140,8 +1170,6 @@ Text functions
 
 .. class:: Chr(expression, **extra)
 
-.. versionadded:: 2.1
-
 Accepts a numeric field or expression and returns the text representation of
 the expression as a single character. It works the same as Python's :func:`chr`
 function.
@@ -1192,8 +1220,6 @@ Usage example::
 --------
 
 .. class:: Left(expression, length, **extra)
-
-.. versionadded:: 2.1
 
 Returns the first ``length`` characters of the given text field or expression.
 
@@ -1255,8 +1281,6 @@ Usage example::
 
 .. class:: LPad(expression, length, fill_text=Value(' '), **extra)
 
-.. versionadded:: 2.1
-
 Returns the value of the given text field or expression padded on the left side
 with ``fill_text`` so that the resulting value is ``length`` characters long.
 The default ``fill_text`` is a space.
@@ -1276,8 +1300,6 @@ Usage example::
 
 .. class:: LTrim(expression, **extra)
 
-.. versionadded:: 2.1
-
 Similar to :class:`~django.db.models.functions.Trim`, but removes only leading
 spaces.
 
@@ -1285,8 +1307,6 @@ spaces.
 -------
 
 .. class:: Ord(expression, **extra)
-
-.. versionadded:: 2.1
 
 Accepts a single text field or expression and returns the Unicode code point
 value for the first character of that expression. It works similar to Python's
@@ -1309,8 +1329,6 @@ Usage example::
 
 .. class:: Repeat(expression, number, **extra)
 
-.. versionadded:: 2.1
-
 Returns the value of the given text field or expression repeated ``number``
 times.
 
@@ -1328,8 +1346,6 @@ Usage example::
 
 .. class:: Replace(expression, text, replacement=Value(''), **extra)
 
-.. versionadded:: 2.1
-
 Replaces all occurrences of ``text`` with ``replacement`` in ``expression``.
 The default replacement text is the empty string. The arguments to the function
 are case-sensitive.
@@ -1345,12 +1361,31 @@ Usage example::
     >>> Author.objects.values('name')
     <QuerySet [{'name': 'Margareth Johnson'}, {'name': 'Margareth Smith'}]>
 
+``Reverse``
+-----------
+
+.. class:: Reverse(expression, **extra)
+
+.. versionadded:: 2.2
+
+Accepts a single text field or expression and returns the characters of that
+expression in reverse order.
+
+It can also be registered as a transform as described in :class:`Length`. The
+default lookup name is ``reverse``.
+
+Usage example::
+
+    >>> from django.db.models.functions import Reverse
+    >>> Author.objects.create(name='Margaret Smith')
+    >>> author = Author.objects.annotate(backward=Reverse('name')).get()
+    >>> print(author.backward)
+    htimS teragraM
+
 ``Right``
 ---------
 
 .. class:: Right(expression, length, **extra)
-
-.. versionadded:: 2.1
 
 Returns the last ``length`` characters of the given text field or expression.
 
@@ -1367,8 +1402,6 @@ Usage example::
 
 .. class:: RPad(expression, length, fill_text=Value(' '), **extra)
 
-.. versionadded:: 2.1
-
 Similar to :class:`~django.db.models.functions.LPad`, but pads on the right
 side.
 
@@ -1376,8 +1409,6 @@ side.
 ---------
 
 .. class:: RTrim(expression, **extra)
-
-.. versionadded:: 2.1
 
 Similar to :class:`~django.db.models.functions.Trim`, but removes only trailing
 spaces.
@@ -1437,8 +1468,6 @@ Usage example::
 --------
 
 .. class:: Trim(expression, **extra)
-
-.. versionadded:: 2.1
 
 Returns the value of the given text field or expression with leading and
 trailing spaces removed.
@@ -1514,6 +1543,11 @@ Calculates the value offset by ``offset``, and if no row exists there, returns
 ``default`` must have the same type as the ``expression``, however, this is
 only validated by the database and not in Python.
 
+.. admonition:: MariaDB and ``default``
+
+    MariaDB `doesn't support <https://jira.mariadb.org/browse/MDEV-12981>`_
+    the ``default`` parameter.
+
 ``LastValue``
 -------------
 
@@ -1532,6 +1566,11 @@ Calculates the leading value in a given :ref:`frame <window-frames>`. Both
 
 ``default`` must have the same type as the ``expression``, however, this is
 only validated by the database and not in Python.
+
+.. admonition:: MariaDB and ``default``
+
+    MariaDB `doesn't support <https://jira.mariadb.org/browse/MDEV-12981>`_
+    the ``default`` parameter.
 
 ``NthValue``
 ------------

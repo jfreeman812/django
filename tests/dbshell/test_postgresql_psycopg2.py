@@ -18,7 +18,7 @@ class PostgreSqlDbshellCommandTestCase(SimpleTestCase):
         def _mock_subprocess_call(*args):
             self.subprocess_args = list(*args)
             if 'PGPASSFILE' in os.environ:
-                with open(os.environ['PGPASSFILE'], 'r') as f:
+                with open(os.environ['PGPASSFILE']) as f:
                     self.pgpass = f.read().strip()  # ignore line endings
             else:
                 self.pgpass = None
@@ -112,5 +112,5 @@ class PostgreSqlDbshellCommandTestCase(SimpleTestCase):
         self.assertNotEqual(sigint_handler, signal.SIG_IGN)
         with mock.patch('subprocess.check_call', new=_mock_subprocess_call):
             DatabaseClient.runshell_db({})
-        # dbshell restores the orignal handler.
+        # dbshell restores the original handler.
         self.assertEqual(sigint_handler, signal.getsignal(signal.SIGINT))

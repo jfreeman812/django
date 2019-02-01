@@ -9,7 +9,7 @@ from django.db import DEFAULT_DB_ALIAS, connection
 from django.db.models import Count, F, Q
 from django.db.models.sql.constants import LOUTER
 from django.db.models.sql.where import NothingNode, WhereNode
-from django.test import TestCase, skipUnlessDBFeature
+from django.test import SimpleTestCase, TestCase, skipUnlessDBFeature
 from django.test.utils import CaptureQueriesContext
 
 from .models import (
@@ -1156,7 +1156,7 @@ class Queries1Tests(TestCase):
     def test_ticket_20250(self):
         # A negated Q along with an annotated queryset failed in Django 1.4
         qs = Author.objects.annotate(Count('item'))
-        qs = qs.filter(~Q(extra__value=0))
+        qs = qs.filter(~Q(extra__value=0)).order_by('name')
 
         self.assertIn('SELECT', str(qs.query))
         self.assertQuerysetEqual(
@@ -1836,15 +1836,15 @@ class Queries6Tests(TestCase):
     @classmethod
     def setUpTestData(cls):
         generic = NamedCategory.objects.create(name="Generic")
-        t1 = Tag.objects.create(name='t1', category=generic)
-        Tag.objects.create(name='t2', parent=t1, category=generic)
-        t3 = Tag.objects.create(name='t3', parent=t1)
-        t4 = Tag.objects.create(name='t4', parent=t3)
-        Tag.objects.create(name='t5', parent=t3)
+        cls.t1 = Tag.objects.create(name='t1', category=generic)
+        cls.t2 = Tag.objects.create(name='t2', parent=cls.t1, category=generic)
+        cls.t3 = Tag.objects.create(name='t3', parent=cls.t1)
+        cls.t4 = Tag.objects.create(name='t4', parent=cls.t3)
+        cls.t5 = Tag.objects.create(name='t5', parent=cls.t3)
         n1 = Note.objects.create(note='n1', misc='foo', id=1)
-        ann1 = Annotation.objects.create(name='a1', tag=t1)
+        ann1 = Annotation.objects.create(name='a1', tag=cls.t1)
         ann1.notes.add(n1)
-        Annotation.objects.create(name='a2', tag=t4)
+        Annotation.objects.create(name='a2', tag=cls.t4)
 
     def test_parallel_iterators(self):
         # Parallel iterators work.
@@ -1923,6 +1923,24 @@ class Queries6Tests(TestCase):
     def test_distinct_ordered_sliced_subquery_aggregation(self):
         self.assertEqual(Tag.objects.distinct().order_by('category__name')[:3].count(), 3)
 
+    def test_multiple_columns_with_the_same_name_slice(self):
+        self.assertEqual(
+            list(Tag.objects.order_by('name').values_list('name', 'category__name')[:2]),
+            [('t1', 'Generic'), ('t2', 'Generic')],
+        )
+        self.assertSequenceEqual(
+            Tag.objects.order_by('name').select_related('category')[:2],
+            [self.t1, self.t2],
+        )
+        self.assertEqual(
+            list(Tag.objects.order_by('-name').values_list('name', 'parent__name')[:2]),
+            [('t5', 't3'), ('t4', 't3')],
+        )
+        self.assertSequenceEqual(
+            Tag.objects.order_by('-name').select_related('parent')[:2],
+            [self.t5, self.t4],
+        )
+
 
 class RawQueriesTests(TestCase):
     def setUp(self):
@@ -1941,14 +1959,11 @@ class RawQueriesTests(TestCase):
         self.assertEqual(repr(qs), "<RawQuerySet: SELECT * FROM queries_note WHERE note = n1 and misc = foo>")
 
 
-class GeneratorExpressionTests(TestCase):
+class GeneratorExpressionTests(SimpleTestCase):
     def test_ticket10432(self):
         # Using an empty generator expression as the rvalue for an "__in"
         # lookup is legal.
-        self.assertQuerysetEqual(
-            Note.objects.filter(pk__in=(x for x in ())),
-            []
-        )
+        self.assertCountEqual(Note.objects.filter(pk__in=(x for x in ())), [])
 
 
 class ComparisonTests(TestCase):
@@ -2122,6 +2137,37 @@ class SubqueryTests(TestCase):
         )
 
 
+@skipUnlessDBFeature('allow_sliced_subqueries_with_in')
+class QuerySetBitwiseOperationTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        school = School.objects.create()
+        cls.room_1 = Classroom.objects.create(school=school, has_blackboard=False, name='Room 1')
+        cls.room_2 = Classroom.objects.create(school=school, has_blackboard=True, name='Room 2')
+        cls.room_3 = Classroom.objects.create(school=school, has_blackboard=True, name='Room 3')
+        cls.room_4 = Classroom.objects.create(school=school, has_blackboard=False, name='Room 4')
+
+    def test_or_with_rhs_slice(self):
+        qs1 = Classroom.objects.filter(has_blackboard=True)
+        qs2 = Classroom.objects.filter(has_blackboard=False)[:1]
+        self.assertCountEqual(qs1 | qs2, [self.room_1, self.room_2, self.room_3])
+
+    def test_or_with_lhs_slice(self):
+        qs1 = Classroom.objects.filter(has_blackboard=True)[:1]
+        qs2 = Classroom.objects.filter(has_blackboard=False)
+        self.assertCountEqual(qs1 | qs2, [self.room_1, self.room_2, self.room_4])
+
+    def test_or_with_both_slice(self):
+        qs1 = Classroom.objects.filter(has_blackboard=False)[:1]
+        qs2 = Classroom.objects.filter(has_blackboard=True)[:1]
+        self.assertCountEqual(qs1 | qs2, [self.room_1, self.room_2])
+
+    def test_or_with_both_slice_and_ordering(self):
+        qs1 = Classroom.objects.filter(has_blackboard=False).order_by('-pk')[:1]
+        qs2 = Classroom.objects.filter(has_blackboard=True).order_by('-name')[:1]
+        self.assertCountEqual(qs1 | qs2, [self.room_3, self.room_4])
+
+
 class CloneTests(TestCase):
 
     def test_evaluated_queryset_as_argument(self):
@@ -2173,30 +2219,22 @@ class CloneTests(TestCase):
                 opts_class.__deepcopy__ = note_deepcopy
 
 
-class EmptyQuerySetTests(TestCase):
+class EmptyQuerySetTests(SimpleTestCase):
     def test_emptyqueryset_values(self):
         # #14366 -- Calling .values() on an empty QuerySet and then cloning
         # that should not cause an error
-        self.assertQuerysetEqual(
-            Number.objects.none().values('num').order_by('num'), []
-        )
+        self.assertCountEqual(Number.objects.none().values('num').order_by('num'), [])
 
     def test_values_subquery(self):
-        self.assertQuerysetEqual(
-            Number.objects.filter(pk__in=Number.objects.none().values("pk")),
-            []
-        )
-        self.assertQuerysetEqual(
-            Number.objects.filter(pk__in=Number.objects.none().values_list("pk")),
-            []
-        )
+        self.assertCountEqual(Number.objects.filter(pk__in=Number.objects.none().values('pk')), [])
+        self.assertCountEqual(Number.objects.filter(pk__in=Number.objects.none().values_list('pk')), [])
 
     def test_ticket_19151(self):
         # #19151 -- Calling .values() or .values_list() on an empty QuerySet
         # should return an empty QuerySet and not cause an error.
         q = Author.objects.none()
-        self.assertQuerysetEqual(q.values(), [])
-        self.assertQuerysetEqual(q.values_list(), [])
+        self.assertCountEqual(q.values(), [])
+        self.assertCountEqual(q.values_list(), [])
 
 
 class ValuesQuerysetTests(TestCase):
@@ -2964,7 +3002,7 @@ class ProxyQueryCleanupTest(TestCase):
         self.assertEqual(qs.count(), 1)
 
 
-class WhereNodeTest(TestCase):
+class WhereNodeTest(SimpleTestCase):
     class DummyNode:
         def as_sql(self, compiler, connection):
             return 'dummy', []
@@ -3029,7 +3067,7 @@ class WhereNodeTest(TestCase):
             w.as_sql(compiler, connection)
 
 
-class QuerySetExceptionTests(TestCase):
+class QuerySetExceptionTests(SimpleTestCase):
     def test_iter_exceptions(self):
         qs = ExtraInfo.objects.only('author')
         msg = "'ManyToOneRel' object has no attribute 'attname'"
@@ -3482,7 +3520,7 @@ class Ticket20101Tests(TestCase):
         self.assertIn(n, (qs1 | qs2))
 
 
-class EmptyStringPromotionTests(TestCase):
+class EmptyStringPromotionTests(SimpleTestCase):
     def test_empty_string_promotion(self):
         qs = RelatedObject.objects.filter(single__name='')
         if connection.features.interprets_empty_strings_as_nulls:
@@ -3521,7 +3559,7 @@ class DoubleInSubqueryTests(TestCase):
         self.assertSequenceEqual(qs, [lfb1])
 
 
-class Ticket18785Tests(TestCase):
+class Ticket18785Tests(SimpleTestCase):
     def test_ticket_18785(self):
         # Test join trimming from ticket18785
         qs = Item.objects.exclude(
@@ -3809,7 +3847,7 @@ class TestTicket24279(TestCase):
         self.assertQuerysetEqual(qs, [])
 
 
-class TestInvalidValuesRelation(TestCase):
+class TestInvalidValuesRelation(SimpleTestCase):
     def test_invalid_values(self):
         msg = "invalid literal for int() with base 10: 'abc'"
         with self.assertRaisesMessage(ValueError, msg):

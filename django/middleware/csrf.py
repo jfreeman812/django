@@ -181,7 +181,8 @@ class CsrfViewMiddleware(MiddlewareMixin):
 
     def _set_token(self, request, response):
         if settings.CSRF_USE_SESSIONS:
-            request.session[CSRF_SESSION_KEY] = request.META['CSRF_COOKIE']
+            if request.session.get(CSRF_SESSION_KEY) != request.META['CSRF_COOKIE']:
+                request.session[CSRF_SESSION_KEY] = request.META['CSRF_COOKIE']
         else:
             response.set_cookie(
                 settings.CSRF_COOKIE_NAME,
@@ -292,7 +293,7 @@ class CsrfViewMiddleware(MiddlewareMixin):
             if request.method == "POST":
                 try:
                     request_csrf_token = request.POST.get('csrfmiddlewaretoken', '')
-                except IOError:
+                except OSError:
                     # Handle a broken connection before we've completed reading
                     # the POST data. process_view shouldn't raise any
                     # exceptions, so we'll ignore and serve the user a 403
